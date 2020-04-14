@@ -1,0 +1,7 @@
+#! /usr/bin/env python
+
+import simple_view.hello
+
+
+if __name__ == '__main__':
+    simple_view.hello.say('my friend!')
