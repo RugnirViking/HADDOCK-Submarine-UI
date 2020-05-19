@@ -11,12 +11,14 @@ import os
 import datetime
 from geometry_msgs.msg import Vector3
 from std_msgs.msg import Int16
+from std_msgs.msg import Float32
 from std_msgs.msg import String
+from sensor_msgs.msg import Image
 
 white = (255, 255, 255) 
 darkblue = (10, 0, 60) 
 black = (0, 0, 0)
-
+top_speed = 2.5
 
 navBallSizeN = 360
 
@@ -48,8 +50,16 @@ emergencyStop_enabled=False
 emergencyStop_reallyEnabled=False
 logging_enabled=False
 verbose_enabled=False
-
+current_ros_image = None
+current_ros_rear_image = None
 currentLogfile = None
+img_in=False
+rimg_in=False
+
+xSpeed=0
+ySpeed=0
+zSpeed=0
+bleh = 0
 
 class Shell_Class(cmd.Cmd):
     """Simple command processor example."""
@@ -96,7 +106,7 @@ class Shell_Class(cmd.Cmd):
     def do_EOF(self, line):
         return True
 
-def IMU_message_recieved(data):
+def IMU_message_received(data):
 	global roll
 	global pitch
 	global heading
@@ -104,12 +114,13 @@ def IMU_message_recieved(data):
 	pitch = data.y
 	heading = data.z
 	rospy.logdebug("IMU Message recieved. Values: "+str(roll)+" : "+str(pitch)+" : "+str(heading))
-def Depth_message_recieved(data):
+
+def Depth_message_received(data):
 	global depth
 	depth = data.data
 	rospy.logdebug("Depth Message recieved. Value: "+str(data.data))
 
-def log_message_recieved(data):
+def log_message_received(data):
 	global logging_enabled
 	global verbose_enabled
 
@@ -117,6 +128,18 @@ def log_message_recieved(data):
 		currentLogfile.write(data.data+"\n")
 	elif logging_enabled:
 		currentLogfile.write(data.data.split("||")[0]+"\n")
+
+def image_received(data):
+	global current_ros_image
+	global img_in
+	img_in = True
+	current_ros_image = data.data[::-1]
+
+def rear_image_received(data):
+	global current_ros_rear_image
+	global rimg_in
+	rimg_in = True
+	current_ros_rear_image = data.data[::-1]
 
 def rot_center(image, angle):
 	#"""rotate an image while keeping its center and size"""
@@ -127,25 +150,43 @@ def rot_center(image, angle):
 	rot_image = rot_image.subsurface(rot_rect).copy()
 	return rot_image
 def NavBallImg(navImgZ, screen, X, Y, roll, pitch, heading):
-        navballSize = (navBallSizeN,navBallSizeN)
-        #navballSize = (450,450)
+    navballSize = (navBallSizeN,navBallSizeN)
+    #navballSize = (450,450)
+    nsX, nsY = navballSize
+    radius = nsX/2
+    navball = pygame.Surface(navballSize)
+    niX, niY = navImgZ.get_size()
+    #print "Pitch: " + str(pitch) + " Roll: " + str(roll)
+    #Roll
+    navImg = pygame.Surface((niX,niY))
+    text = str(int(round(heading)))+"'"
+    color = (255,255,255)
+    font = pygame.font.Font(None, 28)
+    tx, ty = font.size(text)
+	# draw rectangle
+    navImg.blit(navImgZ, (0, (navBallSizeN/180)*pitch))
+    navball.blit(navImg, ( -niX/2 + nsX/2, -niY/2 + nsY/2  ))
+    navball.blit(rot_center(navball, roll), (0,0))
 
-        nsX, nsY = navballSize
-        radius = nsX/2
-        navball = pygame.Surface(navballSize)
-        niX, niY = navImgZ.get_size()
-        #print "Pitch: " + str(pitch) + " Roll: " + str(roll)
-        #Roll
-        navImg = pygame.Surface((niX,niY))
-        text = str(int(round(heading)))+"'"
-        color = (255,255,255)
-        font = pygame.font.Font(None, 28)
-        tx, ty = font.size(text)
-        navImg.blit(navImgZ, (0, (navBallSizeN/180)*pitch))
-        navball.blit(navImg, ( -niX/2 + nsX/2, -niY/2 + nsY/2  ))
-        navball.blit(rot_center(navball, roll), (0,0))
-        navball.blit(font.render(text, 1, color), (nsX/2-ty/2+100, nsY/2- ty/2))
-        screen.blit(navball, (X - nsX/2,Y - nsY/2 -2))
+	# draw heading indicator
+    navball.blit(font.render(text, 1, color), (nsX/2-ty/2+100, nsY/2- ty/2))
+    screen.blit(navball, (X - nsX/2,Y - nsY/2 -2))
+
+
+def Speed_message_received(data):
+	global xSpeed
+	global ySpeed
+	global zSpeed
+	xSpeed = data.x
+	ySpeed = data.y
+	zSpeed = data.z
+	rospy.logdebug("Speed Message recieved. Values: "+str(xSpeed)+" : "+str(ySpeed)+" : "+str(zSpeed))
+
+def heading_speed_recieved(data):
+	global bleh
+	bleh = data.data
+	rospy.logdebug("bleh recieved. Value: "+str(bleh))
+
 
 def say(name):
 	global roll
@@ -168,15 +209,27 @@ def say(name):
 	global verbose_enabled
 	global emergencyStop_reallyEnabled
 	global currentLogfile
+	global img_in
+	global rimg_in
+	global xSpeed
+	global ySpeed
+	global zSpeed
+	global bleh
 
 	console_active=False
 
 
 	# basic setup
 	rospy.init_node('python_sub_controller', anonymous=True) # node is called 'python_sub_controller'
-	rospy.Subscriber("imu_values_topic", Vector3, IMU_message_recieved)
-	rospy.Subscriber("depth_topic", Int16, Depth_message_recieved)
-	rospy.Subscriber("python_submarine_logger", String, log_message_recieved)
+	rospy.Subscriber("imu_values_topic", Vector3, IMU_message_received)
+	rospy.Subscriber("python_submarine_speeds", Vector3, Speed_message_received)
+	
+	rospy.Subscriber("depth_topic", Float32, Depth_message_received)
+	rospy.Subscriber("python_submarine_logger", String, log_message_received)
+	rospy.Subscriber("python_submarine_camera_images", Image, image_received)
+	rospy.Subscriber("python_submarine_rear_camera_images", Image, rear_image_received)
+	rospy.Subscriber("python_submarine_heading_speed", Float32, heading_speed_recieved)
+
 	pitch_pub = rospy.Publisher('pitch_control_input', Int16, queue_size=10)
 	roll_pub = rospy.Publisher('roll_control_input', Int16, queue_size=10)
 	heading_pub = rospy.Publisher('heading_control_input', Int16, queue_size=10)
@@ -278,36 +331,59 @@ def say(name):
 		heading_textRect.topleft = (x+328, 232) 
 		windowSurfaceObj.blit(heading_text, heading_textRect) 
 
-		depth_text = info_font.render("Depth (m): "+str(int(round(depth,4))), True, darkblue, white) 
+		# DRAW SPEEDS
+
+		xSpeed_text = info_font.render("Forwards Speed (m/s): "+str(round(xSpeed,4)), True, darkblue, white) 
+		xSpeed_textRect = xSpeed_text.get_rect()  
+		xSpeed_textRect.topleft = (x+478, 200) 
+		windowSurfaceObj.blit(xSpeed_text, xSpeed_textRect) 
+
+		ySpeed_text = info_font.render("Vertical Speed (m/s): "+str(round(ySpeed,4)), True, darkblue, white) 
+		ySpeed_textRect = ySpeed_text.get_rect()  
+		ySpeed_textRect.topleft = (x+478, 216) 
+		windowSurfaceObj.blit(ySpeed_text, ySpeed_textRect) 
+
+		zSpeed_text = info_font.render("Lateral Speed (m/s): "+str(round(zSpeed,4)), True, darkblue, white) 
+		zSpeed_textRect = zSpeed_text.get_rect()  
+		zSpeed_textRect.topleft = (x+478, 232) 
+		windowSurfaceObj.blit(zSpeed_text, zSpeed_textRect) 
+
+		depth_text = info_font.render("Depth (m): "+str(round(depth,4)), True, darkblue, white) 
 		depth_textRect = depth_text.get_rect()  
 		depth_textRect.topleft = (x+328, 264) 
 		windowSurfaceObj.blit(depth_text, depth_textRect) 
 
+		bleh_text = info_font.render("Heading Speed (m): "+str(round(bleh,4)), True, darkblue, white) 
+		bleh_textRect = bleh_text.get_rect()  
+		bleh_textRect.topleft = (x+478, 264) 
+		windowSurfaceObj.blit(bleh_text, bleh_textRect) 
 
-		## DRAW CAMERAS
-		if cam.query_image():
-			snapshot = cam.get_image(snapshot)
-
-		windowSurfaceObj.blit(snapshot, (x,200))
-		#pygame.camera.colorspace(snapshot, "HSV", snapshot2)
-		#windowSurfaceObj.blit(snapshot2, (x+400,100))
-		fCamText = camera_overlay_font.render("CAMERA FEED [001] - FRONT", True, darkblue, white) 
-		fCamtextRect = fCamText.get_rect()  
-		fCamtextRect.topleft = (x+4, 204) 
-		windowSurfaceObj.blit(fCamText, fCamtextRect) 
-		
-		pygame.camera.colorspace(snapshot, "HSV", snapshot3)
-		windowSurfaceObj.blit(snapshot3, (x,200+250))
-
-		rCamText = camera_overlay_font.render("CAMERA FEED [002] - REAR", True, darkblue, white) 
-		fCamtextRect = rCamText.get_rect()  
-		fCamtextRect.topleft = (x+4, 454) 
-		windowSurfaceObj.blit(rCamText, fCamtextRect) 
+		if img_in and rimg_in:
+			## DRAW CAMERAS
+			snapshot = pygame.transform.flip(pygame.image.fromstring(current_ros_image,(320,240),"ARGB"),True,True)
+			snapshot3 = pygame.transform.flip(pygame.image.fromstring(current_ros_rear_image,(320,240),"ARGB"), False, True)
+				
+	
+			windowSurfaceObj.blit(snapshot, (x,200+250))
+			#pygame.camera.colorspace(snapshot, "HSV", snapshot2)
+			#windowSurfaceObj.blit(snapshot2, (x+400,100))
+			fCamText = camera_overlay_font.render("CAMERA FEED [001] - FRONT", True, darkblue, white) 
+			fCamtextRect = fCamText.get_rect()  
+			fCamtextRect.topleft = (x+4, 454) 
+			windowSurfaceObj.blit(fCamText, fCamtextRect) 
+			
+			#pygame.camera.colorspace(snapshot, "HSV", snapshot3)
+			windowSurfaceObj.blit(snapshot3, (x,200))
+	
+			rCamText = camera_overlay_font.render("CAMERA FEED [002] - REAR", True, darkblue, white) 
+			fCamtextRect = rCamText.get_rect()  
+			fCamtextRect.topleft = (x+4, 204) 
+			windowSurfaceObj.blit(rCamText, fCamtextRect) 
 
 		## DRAW NAVBALL
 		navBallPos=(600-navBallSizeN/2,508-navBallSizeN/2)
 		NavBallImg(navImg,windowSurfaceObj,600,510,roll,pitch,heading)
-
+		
 
  		boxX, boxY = (navBallSizeN,navBallSizeN)
 		navCentreX, navCentreY = navBallPos
@@ -320,11 +396,45 @@ def say(name):
 		#pygame.draw.rect(PFDbackground, (0,0,0), (0, 0,boxX/sidecut, boxY), 0)
 		windowSurfaceObj.blit(PFDbackground,navBallPos)
 
+		# draw level indicator
 		pygame.draw.rect(windowSurfaceObj, (0,200,0), (navCentreX+100+boxX-boxX/sidecut, navCentreY,20, boxY), 0)
 		pygame.draw.rect(windowSurfaceObj, (0,200,0), (navCentreX, navCentreY-40,boxX, 20), 0)
 		pygame.draw.rect(windowSurfaceObj, (0,140,0), (navCentreX+100+boxX-boxX/sidecut, navCentreY+boxY*0.4,19, boxY*0.2), 2)
 		pygame.draw.rect(windowSurfaceObj, (0,140,0), (navCentreX+boxX*0.4, navCentreY-40,boxX*0.2, 19), 2)
 
+		pygame.draw.rect(windowSurfaceObj, (240,240,240), (navCentreX+boxX*0.5, navCentreY+boxY*0.45,2, 40), 2)
+
+		surface2 = pygame.Surface((screenXSize,screenYSize))
+		surface2.set_colorkey((0,0,0))
+		magnitude = math.sqrt(zSpeed*zSpeed+xSpeed*xSpeed)
+		print(magnitude)
+		if magnitude>top_speed:
+			magnitude = top_speed
+		magnitude = magnitude/top_speed
+		magnitude = magnitude**(1/float(3))
+		surface2.set_alpha(magnitude*255)
+
+		# draw speed vector indicator
+		curAngle = math.atan2(zSpeed, xSpeed)
+		if not abs(curAngle)>math.pi/2:
+			pos = (int(navCentreX+curAngle*(navBallSizeN)/math.pi)+navBallSizeN/2,navCentreY+navBallSizeN/2)
+			pygame.draw.circle(surface2, (250,250,0), pos, 8)
+
+		# draw anti-speed vector indicator
+		curAngle = math.atan2(-zSpeed, -xSpeed)
+		if not abs(curAngle)>math.pi/2:
+			print(curAngle)
+			if curAngle>math.pi/2:
+				curAngle=curAngle-math.pi/2
+			if curAngle<-math.pi/2:
+				curAngle=curAngle+math.pi/2
+			pos = (int(navCentreX+navBallSizeN/2+curAngle*(navBallSizeN)/math.pi),navCentreY+navBallSizeN/2)
+			pygame.draw.circle(surface2, (250,0,250), pos, 8)
+
+		windowSurfaceObj.blit(surface2, (0,0))
+
+
+		# draw spirit levels
 		spiritLevel_padding = 4
 		pitchSpiritMinY=navCentreY+spiritLevel_padding
 		pitchSpiritY=boxY*0.8

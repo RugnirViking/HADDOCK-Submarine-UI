@@ -81,11 +81,16 @@ class NavBall():
         pygame.draw.line(self.display, (255, 255, 255), [self.x - self.x/50, self.y], [self.x + self.x/50, self.y], 3)
 
 
-    def draw(self, yaw, roll, pitch):
+    def draw(self, yaw, roll, pitch, fSpeed,sSpeed):
         ball = self._get_view(yaw, pitch)
         surf = pygame.surfarray.make_surface(ball)
         rotated_surf = pygame.transform.rotate(surf, roll)
         rotated_rect = rotated_surf.get_rect()
         rotated_rect.center = (self.x, self.y)
+        float curAngle = math.atan2(fSpeed, sSpeed)
+        if abs(curAngle)>math.pi/2:
+            pos = (self.x+curAngle*(self.size/2)/math.pi,self.y)
+            pygame.draw.circle(self.display, (250,250,0), pos, 8)
+        
         self.display.blit(rotated_surf, rotated_rect)
         self._draw_level_indicator() 
